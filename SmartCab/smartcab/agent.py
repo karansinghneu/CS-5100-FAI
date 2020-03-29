@@ -1,9 +1,11 @@
 import random
 import math
-from environment import Agent, Environment
+
+from environment import Environment, Agent
 from planner import RoutePlanner
 from simulator import Simulator
 
+import visuals as vs
 
 class LearningAgent(Agent):
     """ An agent that learns to drive in the Smartcab world.
@@ -21,6 +23,7 @@ class LearningAgent(Agent):
         self.alpha = alpha  # Learning factor
 
         self.t = 0
+        random.seed(1177)
 
     def reset(self, destination=None, testing=False):
         """ The reset function is called at the beginning of each trial.
@@ -31,11 +34,19 @@ class LearningAgent(Agent):
         self.planner.route_to(destination)
 
         if testing:
-            self.epsilon = 0
-            self.alpha = 0
+            self.epsilon = 0.0
+            self.alpha = 0.0
         else:
-            self.t = self.t + 1
-            self.epsilon = math.fabs(math.cos(self.alpha*self.t))
+            # commented out testing parameters
+            self.epsilon = self.epsilon - 0.05
+            # self.t += 1.0
+            # self.epsilon = 1.0/(self.t**2)
+            # self.epsilon = 1.0/(self.t**2 + self.alpha*self.t)
+            # self.epsilon = 1.0/(self.t**2 - self.alpha*self.t)
+            # self.epsilon = math.fabs(math.cos(self.alpha*self.t))
+            # self.epsilon = math.fabs(math.cos(self.alpha*self.t))/(self.t**2)
+            # self.epsilon = 1.0/(self.t**2)
+            # self.epsilon = math.fabs(math.cos(self.alpha * self.t))
         return None
 
     def build_state(self):
@@ -48,16 +59,36 @@ class LearningAgent(Agent):
         inputs = self.env.sense(self)  # Visual input - intersection light and traffic
         deadline = self.env.get_deadline(self)  # Remaining deadline
 
-        state = (waypoint, inputs['right'], inputs['left'], inputs['oncoming'])
-        buildString = lambda s: None if s is None else str(s)
-        state = [buildString(s) for s in state]
+        # Set 'state' as a tuple of relevant data for the agent
+        # When learning, check if the state is in the Q-table
+        #   If it is not, create a dictionary in the Q-table for the current 'state'
+        #   For each action, set the Q-value for the state-action pair to 0
 
+        # helper to create state string
+        def xstr(s):
+            if s is None:
+                return 'None'
+            else:
+                return str(s)
+
+        state = xstr(waypoint) + "_" + inputs['light'] + "_" + xstr(inputs['left']) + "_" + xstr(inputs['oncoming'])
+        if self.learning:
+            self.Q[state] = self.Q.get(state, {None: 0.0, 'forward': 0.0, 'left': 0.0, 'right': 0.0})
         return state
 
+        # state = (waypoint, inputs['right'], inputs['left'], inputs['oncoming'])
+        # buildString = lambda s: None if s is None else str(s)
+        # state = [buildString(s) for s in state]
+        #
+        # return state
+
     def get_maxQ(self, state):
-        """ The get_maxQ function is called when the agent is asked to find the
+        """ The get_max_Q function is called when the agent is asked to find the
             maximum Q-value of all actions based on the 'state' the smartcab is in. """
-        maxQ = float('-inf')
+
+        # Calculate the maximum Q-value of all actions for a given state
+        # preset an initialization value that should be replaced by a more valid Q value in the loop.
+        maxQ = -1000.0
         for action in self.Q[state]:
             if maxQ < self.Q[state][action]:
                 maxQ = self.Q[state][action]
@@ -74,34 +105,30 @@ class LearningAgent(Agent):
         """ The choose_action function is called when the agent is asked to choose
             which action to take, based on the 'state' the smartcab is in. """
 
-        # Set the agent state and default action
+        maxQ_options = []
+        # Set the agent state and default actionS
         self.state = state
         self.next_waypoint = self.planner.next_waypoint()
-        action = None
-
-        # FAI5100 - Returning the best choice from the list of valid actions.
-        comp = random.random
-        if self.learning:
-            if comp < self.epsilon:
+        if self.learning == True:
+            if self.epsilon > random.random():
                 action = random.choice(self.valid_actions)
             else:
-                valid_actions = []
-                maxQ = self.get_maxQ(state)
-                for a in self.Q[state]:
-                    if maxQ == self.Q[state][a]:
-                        valid_actions.append(a)
-                action = random.choice(valid_actions)
+                for k in self.Q[state].keys():
+                    if self.Q[state][k] == self.get_maxQ(state):
+                        maxQ_options.append(k)
+                action = random.choice(maxQ_options)
         else:
             action = random.choice(self.valid_actions)
         return action
 
     def learn(self, state, action, reward):
         """ The learn function is called after the agent completes an action and
-            receives a reward. This function does not consider future rewards 
+            receives an award. This function does not consider future rewards
             when conducting learning. """
 
         if self.learning:
-            self.Q[state][action] = self.Q[state][action] + self.alpha * (reward - self.Q[state][action])
+            self.Q[self.state][action] = (1 - self.alpha) * self.Q[self.state][action] + self.alpha * reward
+            print(self.Q[self.state][action])
         return
 
     def update(self):
@@ -136,7 +163,7 @@ def run():
     #   learning   - set to True to force the driving agent to use Q-learning
     #    * epsilon - continuous value for the exploration factor, default is 1
     #    * alpha   - continuous value for the learning rate, default is 0.5
-    agent = env.create_agent(LearningAgent)
+    agent = env.create_agent(LearningAgent, learning=True, epsilon=1.0, alpha=0.25)
 
     ##############
     # Follow the driving agent
@@ -144,7 +171,7 @@ def run():
 
     # FAI5100 - Setting the enforce_deadline to force the agent to capture if it reaches destination on time.
     enforce_deadline = True
-    env.set_primary_agent(agent)
+    env.set_primary_agent(agent, enforce_deadline=True)
 
     ##############
     # Create the simulation
@@ -157,7 +184,7 @@ def run():
     log_metrics = True
 
     #   optimized    - set to True to change the default log file name
-    sim = Simulator(env)
+    sim = Simulator(env, update_delay=0.01, display=True, log_metrics=True, optimized=True)
 
     ##############
     # Run the simulator
@@ -165,10 +192,10 @@ def run():
     #   tolerance  - epsilon tolerance before beginning testing, default is 0.05
 
     # FAI5100 - Set the n_test flag to run 10 testing trials.
-    n_test = 10
 
-    sim.run()
+    sim.run(n_test=10, tolerance=0.001)
 
 
 if __name__ == '__main__':
     run()
+    vs.plot_trials('sim_improved-learning.csv')
